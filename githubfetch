@@ -1,0 +1,189 @@
+#!/opt/miniconda3/bin/python3
+
+# GitHub Fetch - A tool for displaying GitHub profiles in the terminal
+# Created for my Python class project - Spring 2025
+
+import requests  # For API requests
+import subprocess  # For running imgcat
+import sys  # For command line args and stdout
+import os  # For env vars and terminal size
+import tempfile  # For temporary avatar storage
+import textwrap  # For wrapping text nicely
+from io import BytesIO  # For handling image data
+from PIL import Image  # For image processing
+
+# Color class to make the terminal output look nice
+class Color:
+    def __init__(self):
+        self.red = "\x1b[38;5;1m"
+        self.green = "\x1b[38;5;149m"
+        self.yellow = "\x1b[38;5;11m"
+        self.light_blue = "\x1b[38;5;45m"
+        self.light_red = "\x1b[38;5;9m"
+        self.orange = "\x1b[38;5;208m"
+        self.blue = "\x1b[38;5;21m"
+        self.reset = "\x1b[00m"
+    def color(self, color_name, text):
+        return f"{getattr(self, color_name, self.reset)}{text}{self.reset}"
+
+color = Color()
+
+# Function to make clickable links in the terminal
+def create_hyperlink(url, text):
+    """Creates a terminal-clickable hyperlink using ANSI escape codes."""
+    return f"\x1b]8;;{url}\a{text}\x1b]8;;\a"
+
+# Functions to fetch data from GitHub API
+def get_headers():
+    # Get GitHub authentication token from environment variable
+    token = os.getenv("GITHUB_TOKEN")
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+def get_user_data(username):
+    # Get basic user info from GitHub API
+    url = f"https://api.github.com/users/{username}"
+    response = requests.get(url, headers=get_headers())
+    response.raise_for_status()
+    return response.json()
+
+def get_starred_count(username):
+    # Count repositories the user has starred
+    url = f"https://api.github.com/users/{username}/starred"
+    response = requests.get(url, headers=get_headers())
+    return len(response.json()) if response.ok else 0
+
+def fetch_pinned_repos(username):
+    # Get repositories pinned on user's profile
+    # This uses GraphQL API which requires authentication
+    headers = get_headers()
+    if not headers.get("Authorization"):
+        print(color.color("yellow", "Warning: GITHUB_TOKEN not set. Cannot fetch pinned repos."), file=sys.stderr)
+        return []
+    
+    # This is the GraphQL query to get pinned repos - it's complex but gets exactly what we need
+    graphql_query = {"query": """query($login: String!) { user(login: $login) { pinnedItems(first: 6, types: [REPOSITORY]) { nodes { ... on Repository { name, description, owner { login }, stargazerCount, forkCount, primaryLanguage { name, color } } } } } }""", "variables": {"login": username}}
+    response = requests.post("https://api.github.com/graphql", json=graphql_query, headers=headers)
+    if not response.ok: return []
+    data = response.json().get("data", {})
+    return data.get("user", {}).get("pinnedItems", {}).get("nodes", [])
+
+# Format the user information for display (inspired by "fastfetch" style)
+def get_user_info_lines(data, starred_count, pinned_repos, text_width):
+    """Prepares the lines of text with dynamic wrapping and hyperlinks."""
+    username = data.get('login')
+    info = {
+        "Website": data.get('blog') or 'N/A', "Repos": data.get('public_repos'), "Bio": data.get('bio') or 'N/A',
+        "From": data.get('location') or 'Not Provided', "Followers": data.get('followers'), "Following": data.get('following'), "Starred": starred_count
+    }
+    max_label_len = max(len(label) for label in info.keys())
+    lines = []
+    
+    profile_url = f"https://github.com/{username}"
+    display_title = f"{color.color('green', username)}{color.color('reset', '@')}{color.color('green', 'github')}"
+    title = create_hyperlink(profile_url, display_title)
+    lines.append(title)
+    lines.append(color.color('green', '-' * (len(username) + 7)))
+
+    for label, value in info.items():
+        formatted_label = f"{color.color('yellow', f'{label}:'.ljust(max_label_len + 2))}"
+        if label == "Website" and value and value != 'N/A':
+            schemed_url = value if value.startswith(('http://', 'https://')) else f'https://{value}'
+            wrapped_value = textwrap.wrap(value, width=text_width)
+            linked_display_text = create_hyperlink(schemed_url, wrapped_value[0])
+            lines.append(f"{formatted_label}{color.color('reset', linked_display_text)}")
+            for line in wrapped_value[1:]:
+                lines.append(f"{' ' * (max_label_len + 2)}{color.color('reset', line)}")
+        elif label == "Bio" and value != 'N/A':
+            wrapped_value = textwrap.wrap(str(value), width=text_width)
+            lines.append(f"{formatted_label}{color.color('reset', wrapped_value[0])}")
+            for line in wrapped_value[1:]:
+                lines.append(f"{' ' * (max_label_len + 2)}{color.color('reset', line)}")
+        else:
+            lines.append(f"{formatted_label}{color.color('reset', str(value))}")
+    
+    if pinned_repos:
+        lines.append(color.color('green', '-' * (len("Pinned Repositories:"))))
+        # Add section for pinned repositories
+        lines.append(color.color('green', "Pinned Repositories:"))
+        for repo in pinned_repos:
+            lang_color_name = 'green' if repo.get('primaryLanguage') else 'reset'
+            lang_dot = color.color(lang_color_name, "●")
+            
+            repo_owner = repo.get('owner', {}).get('login', username)
+            repo_url = f"https://github.com/{repo_owner}/{repo['name']}"
+            repo_name_text = color.color('orange', repo['name'])
+            repo_name = create_hyperlink(repo_url, repo_name_text)
+            
+            stars = color.color('yellow', f"★ {repo['stargazerCount']}")
+            forks = color.color('light_blue', f"⑂ {repo['forkCount']}")
+            
+            lines.append(f" {lang_dot} {repo_name} ({stars} / {forks})")
+            
+            raw_description = repo.get('description')
+            if raw_description:
+                wrapped_description = textwrap.wrap(raw_description, width=text_width - 3)
+                for line in wrapped_description:
+                    lines.append(f"   {color.color('reset', line)}")
+    return lines
+
+def display_side_by_side(user_data, starred_count, pinned_repos):
+    """Displays avatar on the left and user info on the right with a fully dynamic layout.
+    This was hard to get right since terminal positioning is tricky."""
+    IMAGE_HEIGHT_CELLS = 15
+    TEXT_GAP = 6
+    
+    avatar_url = user_data.get('avatar_url')
+    try:
+        response = requests.get(avatar_url)
+        response.raise_for_status()
+        image_data = response.content
+        img = Image.open(BytesIO(image_data))
+        width_px, height_px = img.size
+        aspect_ratio = width_px / height_px
+        image_width_cells = int(IMAGE_HEIGHT_CELLS * aspect_ratio * 2.0)
+        
+        terminal_width = os.get_terminal_size().columns
+        text_start_column = image_width_cells + TEXT_GAP
+        available_text_width = terminal_width - text_start_column
+
+        with tempfile.NamedTemporaryFile(suffix=".png") as temp_image:
+            temp_image.write(image_data)
+            temp_image.flush()
+            subprocess.run(["imgcat", "-H", str(IMAGE_HEIGHT_CELLS), temp_image.name], check=True)
+    except Exception as e:
+        print(f"\x1b[31mError displaying avatar: {e}\x1b[0m", file=sys.stderr)
+        return
+        
+    info_lines = get_user_info_lines(user_data, starred_count, pinned_repos, available_text_width)
+    
+    sys.stdout.write(f"\x1b[{IMAGE_HEIGHT_CELLS}A")
+    sys.stdout.write(f"\x1b[{text_start_column}C")
+    for i, line in enumerate(info_lines):
+        print(line)
+        if i < len(info_lines) - 1:
+            sys.stdout.write(f"\x1b[{text_start_column}C")
+    lines_to_move_down = max(0, IMAGE_HEIGHT_CELLS - len(info_lines))
+    if lines_to_move_down > 0:
+        sys.stdout.write(f"\x1b[{lines_to_move_down}B")
+    print()
+
+# Program Entry Point
+if __name__ == '__main__':
+    # Check for command line arguments
+    if len(sys.argv) < 2 or sys.argv[1] in ['--help', '-h']:
+        print("Usage: githubfetch <username>")
+        sys.exit(0)
+    
+    username = sys.argv[1]
+    try:
+        # Fetch all GitHub data
+        user_data = get_user_data(username)
+        starred_count = get_starred_count(username)
+        pinned_repos = fetch_pinned_repos(username)
+        
+        # Display the results
+        display_side_by_side(user_data, starred_count, pinned_repos)
+    except Exception as e:
+        # Handle errors nicely
+        print(f"\x1b[31mError: {str(e)}\x1b[0m", file=sys.stderr)
+        sys.exit(1)
