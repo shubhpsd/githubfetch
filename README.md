@@ -41,19 +41,18 @@ GitHubFetch is a command-line tool I created as a side project. It displays GitH
 4. Install the script to your system:
 
    ```bash
-   cp githubfetch.py /usr/local/bin/githubfetch
-   chmod +x /usr/local/bin/githubfetch
+   # Install to system directory (requires sudo)
+   sudo cp githubfetch /usr/local/bin/githubfetch
+   sudo chmod +x /usr/local/bin/githubfetch
    ```
 
-Alternatively, if you've already downloaded the script directly to `/usr/local/bin/githubfetch`:
-
-1. Just make it executable:
+Alternatively, if you've already downloaded the script to the mentioned folder:
 
    ```bash
    chmod +x /usr/local/bin/githubfetch
    ```
 
-2. Install the required dependencies:
+1. Install the required dependencies:
 
    ```bash
    pip install requests pillow imgcat
