@@ -88,10 +88,6 @@ source ~/.zshrc
 
 You can create a personal access token in your [GitHub Developer Settings](https://github.com/settings/tokens).
 
-## How It Works
-
-GitHubFetch uses the GitHub REST API to fetch basic profile information and the GraphQL API for pinned repositories. It then uses terminal escape codes to position text and images side by side, creating a clean, informative display of the user profile.
-
 ## Requirements
 
 A terminal that supports ANSI escape codes and images (like iTerm2)
