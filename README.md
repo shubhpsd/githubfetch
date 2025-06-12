@@ -67,7 +67,7 @@ githubfetch <username>
 For example:
 
 ```bash
-githubfetch shubhamprasad
+githubfetch shubhpsd
 ```
 
 ## Environment Variables
