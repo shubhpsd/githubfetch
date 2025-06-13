@@ -29,16 +29,12 @@ GitHubFetch is a command-line tool I created as a side project. It displays GitH
 2. Install dependencies:
 
    ```bash
-   pip install requests pillow
+   pip install requests pillow imgcat
    ```
 
-3. Make sure the [imgcat](https://github.com/danielgatis/imgcat) tool is installed for displaying images in the terminal:
+   Note: The script will automatically check for and offer to install the `imgcat` dependency on first run if it's missing.
 
-   ```bash
-   pip install imgcat
-   ```
-
-4. Install the script to your system:
+3. Install the script to your system:
 
    ```bash
    # Install to system directory (requires sudo)
@@ -70,22 +66,22 @@ For example:
 githubfetch shubhpsd
 ```
 
-## Environment Variables
+## GitHub Token Setup
 
-To view pinned repositories, you'll need to set up a GitHub token:
+To view pinned repositories and avoid API rate limits, GitHubFetch needs a GitHub personal access token.
+
+The first time you run the tool, it will guide you through setting up your token:
+
+1. It will prompt you to create a token at [GitHub Developer Settings](https://github.com/settings/tokens)
+2. After entering your token, it's securely saved for future use
+
+If you need to update or reconfigure your token later:
 
 ```bash
-export GITHUB_TOKEN=your_github_token
+githubfetch --config
 ```
 
-For permanent configuration, add this line to your `.zshrc` file:
-
-```bash
-echo 'export GITHUB_TOKEN=your_github_token' >> ~/.zshrc
-source ~/.zshrc
-```
-
-You can create a personal access token in your [GitHub Developer Settings](https://github.com/settings/tokens).
+Your token needs only the `read:user` scope to work properly.
 
 ## Requirements
 
