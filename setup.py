@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="githubfetch",
-    version="1.0.3",
+    version="1.0.5",
     author="Shubham Prasad",
     author_email="shubhampsd@tuta.io",
     description="Terminal-based GitHub profile viewer",

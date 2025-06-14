@@ -17,6 +17,7 @@ GitHubFetch is a command-line tool that displays GitHub user profiles in a termi
 - 🔗 Creates clickable links to profiles and websites
 - ⭐ Shows starred repositories count
 - 📌 Lists pinned repositories with stars and forks
+- 📅 Displays a horizontal contribution heatmap to visualize activity patterns
 - 🎨 Uses color-coding to make information easier to read
 - 📏 Automatically adjusts to your terminal size
 
@@ -57,6 +58,9 @@ Note: The script will automatically check for and offer to install the `imgcat` 
 # View a GitHub profile
 githubfetch <username>
 
+# Display a user's contribution heatmap horizontally
+githubfetch <username> --heatmap
+
 # Configure GitHub token
 githubfetch --config
 
@@ -70,7 +74,11 @@ githubfetch --help
 For example:
 
 ```bash
+# View a user's profile
 githubfetch shubhpsd
+
+# View a user's contribution heatmap
+githubfetch shubhpsd --heatmap
 ```
 
 ## GitHub Token Setup
@@ -89,7 +97,7 @@ If you need to update or reconfigure your token later:
 githubfetch --config
 ```
 
-Your token needs only the `read:user` scope to work properly.
+Your token needs the `read:user` scope to work properly. For contribution heatmap functionality, the `user` scope is required.
 
 ## Requirements
 

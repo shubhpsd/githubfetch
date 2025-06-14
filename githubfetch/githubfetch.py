@@ -13,13 +13,15 @@
 # Core Python libraries
 import os          # For environment variables and terminal size
 import sys         # For command-line arguments and stdout manipulation
-import json        # For token storage and API responses
+import json        # For token storage
 import shutil      # For checking if commands exist
 import getpass     # For secure password/token input
 import tempfile    # For temporary avatar storage
 import textwrap    # For formatting text output nicely
 import pathlib     # For cross-platform path handling
 import subprocess  # For executing external commands like imgcat
+import datetime    # For date handling in contribution heatmap
+import calendar    # For month names in contribution heatmap
 
 # Third-party libraries (need to be installed)
 import requests    # For making HTTP requests to GitHub API
@@ -106,6 +108,15 @@ def validate_github_token(token):
             print(f"{color.color('green', '✓')} Token validated successfully!")
             user_data = response.json()
             username = user_data.get('login')
+            
+            # Check for needed scopes
+            scopes = response.headers.get('X-OAuth-Scopes', '')
+            print(f"{color.color('yellow', 'Token scopes:')} {color.color('reset', scopes or 'None')}")
+            
+            if 'read:user' not in scopes and 'user' not in scopes:
+                print(f"{color.color('yellow', 'Warning:')} Token may not have the required 'read:user' scope.")
+                print(f"{color.color('yellow', 'Some features like contribution heatmaps may not work properly.')}")
+            
             print(f"{color.color('green', 'Welcome,')} {color.color('yellow', username)}!")
             return True
         elif response.status_code == 401:
@@ -131,6 +142,7 @@ def setup_github_token():
     print(f"{color.color('green', '└───────────────────────────────────────────┘')}")
     print(f"\n{color.color('yellow', 'GitHubFetch needs a GitHub personal access token to:')}")
     print(f"  • {color.color('reset', 'View your pinned repositories')}")
+    print(f"  • {color.color('reset', 'Access contribution data for heatmaps')}")
     print(f"  • {color.color('reset', 'Avoid GitHub API rate limits')}")
     print(f"  • {color.color('reset', 'Access complete profile information')}")
     
@@ -139,6 +151,7 @@ def setup_github_token():
     print(f"2. Click \"{color.color('yellow', 'Generate new token')}\" → \"{color.color('yellow', 'Generate new token (classic)')}\"")
     print(f"3. Enter a note like \"{color.color('reset', 'GitHubFetch')}\"")
     print(f"4. Select the \"{color.color('yellow', 'read:user')}\" scope (under \"user\")")
+    print(f"   {color.color('yellow', '(This scope is REQUIRED for heatmap and pinned repositories!)')}")
     print(f"5. Click \"{color.color('green', 'Generate token')}\" at the bottom")
     print(f"6. Copy the token and paste it below")
     
@@ -253,6 +266,274 @@ def get_starred_count(username):
     response = requests.get(url, headers=get_headers())
     return len(response.json()) if response.ok else 0
 
+def fetch_contributions_data(username):
+    """Fetch contribution data for creating a heatmap.
+    
+    Note: This uses GraphQL API which requires a token.
+    """
+    headers = get_headers()
+    if not headers.get("Authorization"):
+        print(color.color("yellow", "Warning: GitHub token not set. Cannot fetch contribution data."), file=sys.stderr)
+        return None
+    
+    # Get today's date and date from a year ago
+    try:
+        today = datetime.datetime.utcnow()  # Use UTC time
+        one_year_ago = today - datetime.timedelta(days=365)
+        
+        # Format dates for GraphQL query (GitHub requires ISO-8601 format with time in UTC)
+        from_date = one_year_ago.strftime("%Y-%m-%dT%H:%M:%SZ")
+        to_date = today.strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception as e:
+        print(color.color("red", f"Error formatting dates: {str(e)}"), file=sys.stderr)
+        return None
+        
+    print(color.color("yellow", f"Fetching contributions for {username} from {from_date} to {to_date}..."))
+    
+    # Build the GraphQL query for contributions
+    graphql_query = {
+        "query": """
+            query($login: String!, $from: DateTime!, $to: DateTime!) {
+                user(login: $login) {
+                    name
+                    contributionsCollection(from: $from, to: $to) {
+                        contributionCalendar {
+                            totalContributions
+                            weeks {
+                                firstDay
+                                contributionDays {
+                                    date
+                                    contributionCount
+                                    color
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        """,
+        "variables": {
+            "login": username,
+            "from": from_date,
+            "to": to_date
+        }
+    }
+    
+    # Make the POST request to the GraphQL API
+    try:
+        print(color.color("yellow", "Sending GraphQL request to GitHub API..."))
+        response = requests.post("https://api.github.com/graphql", json=graphql_query, headers=headers)
+        
+        # Handle errors gracefully
+        if not response.ok:
+            print(color.color("red", f"API Error: {response.status_code}"), file=sys.stderr)
+            print(color.color("red", f"Response: {response.text}"), file=sys.stderr)
+            return None
+        
+        # Print response for debugging
+        response_data = response.json()
+        if "errors" in response_data:
+            print(color.color("red", "GraphQL errors:"), file=sys.stderr)
+            for error in response_data["errors"]:
+                print(color.color("red", f"  - {error.get('message', 'Unknown error')}"), file=sys.stderr)
+            return None
+        
+        # Return the contribution data
+        data = response_data.get("data", {})
+        
+        # Check if we got the expected data structure
+        user_data = data.get("user", {})
+        if not user_data:
+            print(color.color("red", f"Could not find user data for '{username}'"), file=sys.stderr)
+            print(color.color("yellow", f"Response data: {data}"), file=sys.stderr)
+            return None
+        
+        contributions_collection = user_data.get("contributionsCollection", {})
+        if not contributions_collection:
+            print(color.color("red", "No contributions collection data returned"), file=sys.stderr)
+            print(color.color("yellow", f"User data: {user_data}"), file=sys.stderr) 
+            return None
+        
+        contribution_calendar = contributions_collection.get("contributionCalendar", {})
+        if not contribution_calendar:
+            print(color.color("red", "No contribution calendar data returned"), file=sys.stderr)
+            print(color.color("yellow", f"Contributions collection: {contributions_collection}"), file=sys.stderr)
+            return None
+        
+        total = contribution_calendar.get('totalContributions', 0)
+        weeks = contribution_calendar.get('weeks', [])
+        print(color.color("green", f"Successfully fetched {total} contributions across {len(weeks)} weeks"))
+        
+        return contribution_calendar
+        
+    except Exception as e:
+        print(color.color("red", f"Error fetching contribution data: {str(e)}"), file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return None
+
+def get_contributions_heatmap_lines(username, contributions_data, text_width):
+    """Prepare formatted text lines for the contributions heatmap display."""
+    # Start with an empty array - no initial lines
+    lines = []
+    
+    if not contributions_data:
+        return [
+            color.color("red", "No contribution data available."),
+            color.color("yellow", "Please check if:"),
+            color.color("yellow", "  1. Your GitHub token is valid (try 'githubfetch --reset-token')"),
+            color.color("yellow", "  2. The username exists on GitHub"),
+            color.color("yellow", "  3. The user has public contribution activity")
+        ]
+    
+    total_contributions = contributions_data.get("totalContributions", 0)
+    weeks = contributions_data.get("weeks", [])
+    
+    if total_contributions == 0 or not weeks:
+        return [color.color("yellow", f"No contributions found for user '{username}' in the past year.")]
+    
+    # Terminal ANSI color blocks for heatmap (from light to dark)
+    # Using the color class for better terminal compatibility with more distinct levels
+    contribution_blocks = [
+        color.color("reset", "·"),            # No contributions
+        color.color("light_green", "▪"),      # Level 1 (light)
+        color.color("green", "▪"),           # Level 2
+        color.color("green", "■"),           # Level 3
+        color.color("dark_green", "■")       # Level 4 (dark)
+    ]
+    
+    # Add dark green color if it doesn't exist
+    if not hasattr(color, "dark_green"):
+        color.dark_green = "\x1b[38;5;22m"
+    
+    # Add light green color if it doesn't exist
+    if not hasattr(color, "light_green"):
+        color.light_green = "\x1b[38;5;118m"
+    
+    # Calculate the range for color selection
+    # Flatten the contribution days
+    all_days = []
+    for week in weeks:
+        for day in week.get("contributionDays", []):
+            all_days.append(day.get("contributionCount", 0))
+    
+    # Skip if no days data
+    if not all_days:
+        return [color.color("yellow", f"No contribution data found for '{username}' in the past year.")]
+    
+    # Calculate quartiles for color distribution
+    max_contributions = max(all_days) if all_days else 0
+    q1 = max(1, max_contributions // 4)
+    q2 = max(2, max_contributions // 2)
+    q3 = max(3, 3 * max_contributions // 4)
+    
+    # Dictionary to map month numbers to shortened names
+    month_names = {i: calendar.month_abbr[i] for i in range(1, 13)}
+    current_month = None
+    month_labels = []
+    
+    lines.append(f"{color.color('green', 'Contributions:')} {color.color('yellow', str(total_contributions))}")
+    
+    # Prepare data structure for horizontal heatmap (days as rows, weeks as columns)
+    # Initialize a 2D array to hold contribution data [day_of_week][week]
+    horizontal_data = [[] for _ in range(7)]  # 7 days in a week
+    month_positions = []  # Store (week_idx, month) for month labels
+    
+    # Process weeks data to organize into horizontal format
+    for week_idx, week in enumerate(weeks):
+        # Extract month from first day of week for month labels
+        for day in week.get("contributionDays", []):
+            date_parts = day.get("date", "").split("-")
+            if len(date_parts) == 3:
+                month_num = int(date_parts[1])
+                if month_num != current_month:
+                    current_month = month_num
+                    month_labels.append((week_idx, month_names[month_num]))
+            break
+        
+        # Create a lookup dict for days keyed by weekday (0=Sunday, 6=Saturday)
+        day_lookup = {}
+        for day in week.get("contributionDays", []):
+            date_str = day.get("date", "")
+            if date_str:
+                try:
+                    date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+                    weekday = date_obj.weekday()
+                    # Convert to Sunday=0 format
+                    weekday = (weekday + 1) % 7
+                    day_lookup[weekday] = day
+                except Exception:
+                    # If parsing fails, skip this day
+                    continue
+        
+        # Add contribution data for each day in this week
+        for day_idx in range(7):  # Sunday to Saturday
+            if day_idx in day_lookup:
+                day = day_lookup[day_idx]
+                count = day.get("contributionCount", 0)
+                # Select appropriate block based on count
+                if count == 0:
+                    block = contribution_blocks[0]
+                elif count <= q1:
+                    block = contribution_blocks[1]
+                elif count <= q2:
+                    block = contribution_blocks[2]
+                elif count <= q3:
+                    block = contribution_blocks[3]
+                else:
+                    block = contribution_blocks[4]
+            else:
+                block = " "  # Empty space for days not in the week
+            
+            # Add to our horizontal data structure
+            horizontal_data[day_idx].append(block)
+        
+    # Create the month labels row
+    if month_labels:
+        month_header = "   "  # Space for day labels
+        last_pos = -3  # Start position for first month
+        
+        for week_idx, month_name in month_labels:
+            # Add spaces between month labels
+            spaces = week_idx - last_pos - 1
+            month_header += " " * (spaces * 2)  # 2 spaces per week
+            month_header += color.color("light_blue", month_name[:3])
+            last_pos = week_idx + len(month_name[:3]) // 2
+        
+        lines.append(month_header)
+    
+    # Day labels for the new horizontal format
+    day_labels = [
+        color.color("yellow", "S"),  # Sunday
+        color.color("yellow", "M"),  # Monday
+        color.color("yellow", "T"),  # Tuesday
+        color.color("yellow", "W"),  # Wednesday
+        color.color("yellow", "T"),  # Thursday
+        color.color("yellow", "F"),  # Friday
+        color.color("yellow", "S")   # Saturday
+    ]
+    
+    # Create each row (day of week)
+    for day_idx in range(7):
+        row = f"{day_labels[day_idx]} "  # Day label at the beginning of the row
+        
+        # Add all weeks for this day
+        for week_idx, block in enumerate(horizontal_data[day_idx]):
+            row += block
+            # Add space between weeks
+            if week_idx < len(horizontal_data[day_idx]) - 1:
+                row += " "
+        
+        lines.append(row)
+    
+    # Add legend at the bottom - no extra line
+    legend = (f"{contribution_blocks[0]}None {contribution_blocks[1]}Few "
+              f"{contribution_blocks[2]}Some {contribution_blocks[3]}Many "
+              f"{contribution_blocks[4]}Lots")
+    lines.append(legend)
+    
+    return lines
+
 def fetch_pinned_repos(username):
     # Fetches a user's pinned repositories using GitHub's GraphQL API
     # GraphQL API requires authentication
@@ -296,6 +577,48 @@ def fetch_pinned_repos(username):
     data = response.json().get("data", {})
     return data.get("user", {}).get("pinnedItems", {}).get("nodes", [])
 
+# Note: These functions are no longer used - we're using the GraphQL API now
+# Keeping function shells for backwards compatibility
+
+def fetch_contribution_heatmap(username):
+    """Legacy function stub - no longer used"""
+    return []
+
+def parse_heatmap_data(events):
+    """Legacy function stub - no longer used"""
+    contribution_days = {}
+    
+    for event in events:
+        if event.get("type") == "PushEvent":
+            # Only count actual pushes, not other event types
+            for commit in event.get("payload", {}).get("commits", []):
+                # Each commit corresponds to a contribution
+                commit_time = commit.get("timestamp")
+                if commit_time:
+                    # Convert to date string
+                    date_str = commit_time.split("T")[0]
+                    contribution_days[date_str] = contribution_days.get(date_str, 0) + 1
+    
+    return contribution_days
+
+def generate_heatmap(contribution_days):
+    """Legacy function stub - no longer used"""
+    # Return empty string for backwards compatibility
+    return ""
+
+def trim_trailing_empty_lines(lines):
+    """Remove trailing empty lines from an array of strings."""
+    if not lines:
+        return lines
+    
+    # Find the index of the last non-empty line
+    last_non_empty = len(lines) - 1
+    while last_non_empty >= 0 and not lines[last_non_empty].strip():
+        last_non_empty -= 1
+    
+    # Return the array up to and including the last non-empty line
+    return lines[:last_non_empty + 1]
+
 ##### -> MAIN DISPLAY AND UI FUNCTIONS
 
 def get_user_info_lines(data, starred_count, pinned_repos, text_width):
@@ -332,8 +655,7 @@ def get_user_info_lines(data, starred_count, pinned_repos, text_width):
             lines.append(f"{formatted_label}{color.color('reset', str(value))}")
     
     if pinned_repos:
-        lines.append(color.color('green', '-' * (len("Pinned Repositories:"))))
-        # Add section for pinned repositories
+        # Add section for pinned repositories - made more compact
         lines.append(color.color('green', "Pinned Repositories:"))
         for repo in pinned_repos:
             lang_color_name = 'green' if repo.get('primaryLanguage') else 'reset'
@@ -354,12 +676,17 @@ def get_user_info_lines(data, starred_count, pinned_repos, text_width):
                 wrapped_description = textwrap.wrap(raw_description, width=text_width - 3)
                 for line in wrapped_description:
                     lines.append(f"   {color.color('reset', line)}")
+    
     return lines
 
-def display_side_by_side(user_data, starred_count, pinned_repos):
+def display_side_by_side(user_data, starred_count=None, pinned_repos=None, contributions_data=None):
     # Displays avatar on the left and user info on the right
     IMAGE_HEIGHT_CELLS = 15
     TEXT_GAP = 6
+    
+    username = user_data.get('login')
+    # Determine content to display (pinned repos or contributions heatmap)
+    show_heatmap = contributions_data is not None
     
     # Check for imgcat installation before attempting to display image
     imgcat_path = check_imgcat_installed()
@@ -404,15 +731,31 @@ def display_side_by_side(user_data, starred_count, pinned_repos):
                     except Exception:
                         subprocess.run([imgcat_cmd, temp_image.name], check=True)
                 
-                info_lines = get_user_info_lines(user_data, starred_count, pinned_repos, available_text_width)
+                # Get user info lines
+                user_info_lines = get_user_info_lines(user_data, starred_count or 0, 
+                                                    [] if show_heatmap else (pinned_repos or []), 
+                                                    available_text_width)
                 
+                # Get contribution heatmap lines if showing heatmap
+                if show_heatmap:
+                    # Remove any trailing empty lines from user info
+                    user_info_lines = trim_trailing_empty_lines(user_info_lines)
+                    heatmap_lines = get_contributions_heatmap_lines(username, contributions_data, available_text_width)
+                    # Direct combine with no spacing
+                    display_lines = user_info_lines + heatmap_lines
+                else:
+                    display_lines = user_info_lines
+                
+                # Display the lines next to the image
                 sys.stdout.write(f"\x1b[{IMAGE_HEIGHT_CELLS}A")
                 sys.stdout.write(f"\x1b[{text_start_column}C")
-                for i, line in enumerate(info_lines):
+                for i, line in enumerate(display_lines):
                     print(line)
-                    if i < len(info_lines) - 1:
+                    if i < len(display_lines) - 1:
                         sys.stdout.write(f"\x1b[{text_start_column}C")
-                lines_to_move_down = max(0, IMAGE_HEIGHT_CELLS - len(info_lines))
+                
+                # Move down if needed
+                lines_to_move_down = max(0, IMAGE_HEIGHT_CELLS - len(display_lines))
                 if lines_to_move_down > 0:
                     sys.stdout.write(f"\x1b[{lines_to_move_down}B")
                 print()
@@ -423,10 +766,24 @@ def display_side_by_side(user_data, starred_count, pinned_repos):
     
     # Fallback to text-only display
     terminal_width = os.get_terminal_size().columns
-    info_lines = get_user_info_lines(user_data, starred_count, pinned_repos, terminal_width - 10)
+    
+    # Get user info lines
+    user_info_lines = get_user_info_lines(user_data, starred_count or 0, 
+                                        [] if show_heatmap else (pinned_repos or []), 
+                                        terminal_width - 10)
+    
+    # Get contribution heatmap lines if showing heatmap
+    if show_heatmap:
+        # Remove any trailing empty lines from user info
+        user_info_lines = trim_trailing_empty_lines(user_info_lines)
+        heatmap_lines = get_contributions_heatmap_lines(username, contributions_data, terminal_width - 10)
+        # Direct combine with no spacing
+        display_lines = user_info_lines + heatmap_lines
+    else:
+        display_lines = user_info_lines
     
     print() # Add a bit of spacing
-    for line in info_lines:
+    for line in display_lines:
         print(f"  {line}")
     print()
 
@@ -504,14 +861,16 @@ def main():
             print(color.color('green', "│") + " A terminal GitHub profile viewer " + color.color('green', "│"))
             print(color.color('green', "└──────────────────────────────────┘"))
             print("Usage:")
-            print("  githubfetch <username>        (view a GitHub user profile)")
-            print("  githubfetch --config          (set up/update GitHub token)")
-            print("  githubfetch --reset-token     (delete and reconfigure token)")
-            print("  githubfetch --help, -h        (display this help message)")
+            print("  githubfetch <username>          (view a GitHub user profile)")
+            print("  githubfetch <username> --heatmap (view GitHub contributions heatmap)")
+            print("  githubfetch --config            (set up/update GitHub token)")
+            print("  githubfetch --reset-token       (delete and reconfigure token)")
+            print("  githubfetch --help, -h          (display this help message)")
             
             print(f"\n{color.color('yellow', 'Examples:')}")
-            print("  githubfetch shubhpsd          (view GitHub profile for shubhpsd)")
-            print("  githubfetch --config          (configure your GitHub token)")
+            print("  githubfetch shubhpsd            (view GitHub profile for shubhpsd)")
+            print("  githubfetch shubhpsd --heatmap  (view contribution heatmap for shubhpsd)")
+            print("  githubfetch --config            (configure your GitHub token)")
             sys.exit(0)
     
     # Make sure username to look up is provided
@@ -520,25 +879,43 @@ def main():
         print("Use " + color.color('yellow', "githubfetch --help") + " or " + color.color('yellow', "-h") + " for more information.")
         sys.exit(0)
     
-    username = sys.argv[1]
+    # Check for command flags
+    args = sys.argv[1:]
+    show_heatmap = '--heatmap' in args
+    
+    # Extract the username (first non-flag argument)
+    username = None
+    for arg in args:
+        if not arg.startswith('--'):
+            username = arg
+            break
+    
+    if not username:
+        print(f"{color.color('red', 'Error: No username provided.')}")
+        print("Usage: githubfetch <username> [--heatmap]")
+        print("Use " + color.color('yellow', "githubfetch --help") + " for more information.")
+        sys.exit(1)
     
     # Make GitHub token exists (or guide the user to set one up)
     ensure_github_token()
     
     try:
-        # Fetch all GitHub data
+        # Fetch user data
         user_data = get_user_data(username)
-        starred_count = get_starred_count(username)
-        pinned_repos = fetch_pinned_repos(username)
         
-        # Display the results in a nice format
-        display_side_by_side(user_data, starred_count, pinned_repos)
+        # Always fetch user data for display
+        starred_count = get_starred_count(username)
+            
+        if show_heatmap:
+            # Fetch contributions data for heatmap display
+            contributions_data = fetch_contributions_data(username)
+            # Display profile with heatmap
+            display_side_by_side(user_data, starred_count, None, contributions_data)
+        else:
+            # Display standard profile with pinned repos
+            pinned_repos = fetch_pinned_repos(username)
+            display_side_by_side(user_data, starred_count, pinned_repos)
     except Exception as e:
         # Handle errors gracefully
         print(f"{color.color('red', f'Error: {str(e)}')}", file=sys.stderr)
         sys.exit(1)
-
-
-# This allows the script to be run directly or as a module
-if __name__ == '__main__':
-    main()
