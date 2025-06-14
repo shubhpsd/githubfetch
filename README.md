@@ -1,12 +1,14 @@
 # GitHubFetch
 
+[![PyPI version](https://badge.fury.io/py/githubfetch.svg)](https://badge.fury.io/py/githubfetch)
+
 A terminal-based GitHub profile viewer written in Python. View GitHub profiles right in your terminal with style!
 
 ![GitHubFetch Demo Screenshot](demo-screenshot.png)
 
 ## About
 
-GitHubFetch is a command-line tool I created as a side project. It displays GitHub user profiles in a terminal with a nice layout inspired by system fetch tools like neofetch and fastfetch.
+GitHubFetch is a command-line tool that displays GitHub user profiles in a terminal with a nice layout inspired by system fetch tools like neofetch and fastfetch.
 
 ## Features
 
@@ -20,44 +22,49 @@ GitHubFetch is a command-line tool I created as a side project. It displays GitH
 
 ## Installation
 
+### Option 1: Install from PyPI (Recommended)
+
+The easiest way to install GitHubFetch is directly from PyPI:
+
+```bash
+pip install githubfetch
+```
+
+This will install the `githubfetch` command and all its dependencies.
+
+### Option 2: Install from Source
+
+If you prefer to install from source:
+
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/shubhamprasad/githubfetch.git
+   git clone https://github.com/shubhpsd/githubfetch.git
+   cd githubfetch
    ```
 
-2. Install dependencies:
+2. Install the package in development mode:
 
    ```bash
-   pip install requests pillow imgcat
+   pip install -e .
    ```
 
-   Note: The script will automatically check for and offer to install the `imgcat` dependency on first run if it's missing.
-
-3. Install the script to your system:
-
-   ```bash
-   # Install to system directory (requires sudo)
-   sudo cp githubfetch /usr/local/bin/githubfetch
-   sudo chmod +x /usr/local/bin/githubfetch
-   ```
-
-Alternatively, if you've already downloaded the script to the mentioned folder:
-
-   ```bash
-   chmod +x /usr/local/bin/githubfetch
-   ```
-
-1. Install the required dependencies:
-
-   ```bash
-   pip install requests pillow imgcat
-   ```
+Note: The script will automatically check for and offer to install the `imgcat` dependency on first run if it's missing.
 
 ## Usage
 
 ```bash
+# View a GitHub profile
 githubfetch <username>
+
+# Configure GitHub token
+githubfetch --config
+
+# Reset GitHub token
+githubfetch --reset-token
+
+# Display help
+githubfetch --help
 ```
 
 For example:
@@ -74,6 +81,7 @@ The first time you run the tool, it will guide you through setting up your token
 
 1. It will prompt you to create a token at [GitHub Developer Settings](https://github.com/settings/tokens)
 2. After entering your token, it's securely saved for future use
+3. Your token is stored securely in `~/.config/githubfetch/token.json`
 
 If you need to update or reconfigure your token later:
 
@@ -85,4 +93,6 @@ Your token needs only the `read:user` scope to work properly.
 
 ## Requirements
 
-A terminal that supports ANSI escape codes and images (like iTerm2)
+- Python 3.6 or later
+- A terminal that supports ANSI escape codes
+- For image support: iTerm2 or a terminal that supports the imgcat protocol

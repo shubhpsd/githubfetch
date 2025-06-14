@@ -476,15 +476,18 @@ def check_imgcat_installed():
 
 ##### -> MAIN PROGRAM FLOW
 
-if __name__ == '__main__':
-    # Main entry point for GitHubFetch
-    # Program flow:
-    # 1. Check for required dependencies
-    # 2. Handle special commands (--config, --reset-token, --help)
-    # 3. Verify if there is GitHub username to look up
-    # 4. Ensure GitHub token is available
-    # 5. Fetch user data and display it in the terminal
+# Define the main function to be used as the entry point for the package
+def main():
+    """
+    Main entry point for GitHubFetch
     
+    Program flow:
+    1. Check for required dependencies
+    2. Handle special commands (--config, --reset-token, --help)
+    3. Verify if there is GitHub username to look up
+    4. Ensure GitHub token is available
+    5. Fetch user data and display it in the terminal
+    """
     # First check for dependencies
     check_imgcat_installed()
     
@@ -534,3 +537,8 @@ if __name__ == '__main__':
         # Handle errors gracefully
         print(f"{color.color('red', f'Error: {str(e)}')}", file=sys.stderr)
         sys.exit(1)
+
+
+# This allows the script to be run directly or as a module
+if __name__ == '__main__':
+    main()
